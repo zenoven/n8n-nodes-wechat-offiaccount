@@ -1,3 +1,4 @@
+import FormData from 'form-data';
 import {IDataObject, IExecuteFunctions, NodeOperationError} from 'n8n-workflow';
 
 class NodeUtils {
@@ -18,21 +19,19 @@ class NodeUtils {
 		return result;
 	}
 
-	static async buildUploadFileData(this: IExecuteFunctions, inputDataFieldName: string, index: number = 0): Promise<any> {
+	static async buildUploadFormData(this: IExecuteFunctions, inputDataFieldName: string, index: number = 0): Promise<FormData> {
 		const binaryData = this.helpers.assertBinaryData(index, inputDataFieldName);
 		if (!binaryData){
 			throw new NodeOperationError(this.getNode(), '未找到二进制数据');
 		}
 		const buffer = await this.helpers.getBinaryDataBuffer(index, inputDataFieldName);
-
-		return {
-			value: buffer,
-			options: {
-				filename: binaryData.fileName,
-				filelength: binaryData.fileSize,
-				contentType: binaryData.mimeType,
-			},
-		};
+		const formData = new FormData();
+		formData.append('media', buffer, {
+			filename: binaryData.fileName,
+			knownLength: buffer.length,
+			contentType: binaryData.mimeType,
+		});
+		return formData;
 	}
 
 	static getNodeJsonData(data: IExecuteFunctions, propertyName: string, index: number, failValue?: any): any {
