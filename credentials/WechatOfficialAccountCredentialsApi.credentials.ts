@@ -7,6 +7,42 @@ import {
 	INodeProperties,
 } from 'n8n-workflow';
 
+type StableTokenResponse = {
+	access_token?: string;
+	expires_in?: number;
+	errcode?: number;
+	errmsg?: string;
+};
+
+type TokenRequest = {
+	forceRefresh: boolean;
+	promise: Promise<{ accessToken: string }>;
+};
+
+const tokenRequests = new Map<string, TokenRequest>();
+const recentForcedTokens = new Map<string, { accessToken: string; expiresAt: number }>();
+const FORCE_REFRESH_DEDUPLICATION_MS = 30_000;
+
+export function buildStableTokenRequest(
+	credentials: ICredentialDataDecryptedObject,
+	forceRefresh = false,
+) {
+	return {
+		method: 'POST' as const,
+		url: `https://${credentials.baseUrl}/cgi-bin/stable_token`,
+		body: {
+			grant_type: 'client_credential',
+			appid: credentials.appid,
+			secret: credentials.appsecret,
+			force_refresh: forceRefresh,
+		},
+		json: true,
+	};
+}
+
+function tokenRequestKey(credentials: ICredentialDataDecryptedObject) {
+	return `${String(credentials.baseUrl)}:${String(credentials.appid)}`;
+}
 
 export class WechatOfficialAccountCredentialsApi implements ICredentialType {
 	name = 'wechatOfficialAccountCredentialsApi';
@@ -21,7 +57,8 @@ export class WechatOfficialAccountCredentialsApi implements ICredentialType {
 		},
 		{
 			displayName: 'Appid',
-			description: '第三方用户唯一凭证，AppID和AppSecret可在“微信公众平台-设置与开发--基本配置”页中获得',
+			description:
+				'第三方用户唯一凭证，AppID和AppSecret可在“微信公众平台-设置与开发--基本配置”页中获得',
 			name: 'appid',
 			type: 'string',
 			default: '',
@@ -31,10 +68,12 @@ export class WechatOfficialAccountCredentialsApi implements ICredentialType {
 			displayName: 'AppSecret',
 			name: 'appsecret',
 			description: '第三方用户唯一凭证密钥',
-			// eslint-disable-next-line
 			type: 'string',
 			default: '',
 			required: true,
+			typeOptions: {
+				password: true,
+			},
 		},
 		{
 			displayName: 'AccessToken',
@@ -49,36 +88,56 @@ export class WechatOfficialAccountCredentialsApi implements ICredentialType {
 	];
 
 	async preAuthentication(this: IHttpRequestHelper, credentials: ICredentialDataDecryptedObject) {
-		console.log('preAuthentication credentials', credentials);
-		// if (credentials.accessToken) {
-		// 	// 验证是否正常，正常直接使用即可
-		// 	const res = (await this.helpers.httpRequest({
-		// 		method: 'GET',
-		// 		url: `https://${credentials.baseUrl}/cgi-bin/get_api_domain_ip?access_token=${credentials.accessToken}`,
-		// 	})) as any;
-		//
-		// 	console.log('exist accessToken', res);
-		// 	// accesstoken过期了
-		// 	if (res.errcode === 42001) {
-		// 	} else if (res.errcode !== 0) {
-		// 		throw new Error('请求失败：' + res.errcode + ', ' + res.errmsg);
-		// 	}
-		// }
+		const forceRefresh = credentials.forceRefresh === true;
+		const key = tokenRequestKey(credentials);
 
-		const res = (await this.helpers.httpRequest({
-			method: 'GET',
-			url: `https://${credentials.baseUrl}/cgi-bin/token?grant_type=client_credential&appid=${credentials.appid}&secret=${credentials.appsecret}`,
-		})) as any;
+		while (true) {
+			if (forceRefresh) {
+				const recent = recentForcedTokens.get(key);
+				if (recent && recent.expiresAt > Date.now()) {
+					return { accessToken: recent.accessToken };
+				}
+				if (recent) recentForcedTokens.delete(key);
+			}
 
-		console.log('preAuthentication', res);
+			const inFlight = tokenRequests.get(key);
+			if (inFlight) {
+				const result = await inFlight.promise;
+				if (!forceRefresh || inFlight.forceRefresh) return result;
+				continue;
+			}
 
-		if (res.errcode && res.errcode !== 0) {
-			throw new Error('授权失败：' + res.errcode + ', ' + res.errmsg);
+			const promise = (async () => {
+				const res = (await this.helpers.httpRequest(
+					buildStableTokenRequest(credentials, forceRefresh),
+				)) as StableTokenResponse;
+
+				if (res.errcode && res.errcode !== 0) {
+					throw new Error(`授权失败：${res.errcode}, ${res.errmsg ?? 'unknown error'}`);
+				}
+				if (!res.access_token) {
+					throw new Error('授权失败：微信未返回 access_token');
+				}
+
+				const result = { accessToken: res.access_token };
+				if (forceRefresh) {
+					recentForcedTokens.set(key, {
+						...result,
+						expiresAt: Date.now() + FORCE_REFRESH_DEDUPLICATION_MS,
+					});
+				}
+				return result;
+			})();
+
+			const request = { forceRefresh, promise };
+			tokenRequests.set(key, request);
+			try {
+				return await promise;
+			} finally {
+				if (tokenRequests.get(key) === request) tokenRequests.delete(key);
+			}
 		}
-
-		return { accessToken: res.access_token };
 	}
-
 
 	authenticate: IAuthenticateGeneric = {
 		type: 'generic',

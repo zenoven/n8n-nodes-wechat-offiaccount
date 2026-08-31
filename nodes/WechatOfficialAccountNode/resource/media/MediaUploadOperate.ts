@@ -28,8 +28,7 @@ const MediaUploadOperate: ResourceOperations = {
 			placeholder: 'e.g. data',
 			default: 'data',
 			hint: '包含用于更新文件的二进制文件数据的输入字段的名称',
-			description:
-				'在左侧输入面板的二进制选项卡中，找到包含二进制数据的输入字段的名称，以更新文件',
+			description: '在左侧输入面板的二进制选项卡中，找到包含二进制数据的输入字段的名称，以更新文件',
 			required: true,
 		},
 	],
@@ -43,10 +42,7 @@ const MediaUploadOperate: ResourceOperations = {
 			qs: {
 				type: type,
 			},
-			json: false,
-			formData: {
-				media: await NodeUtils.buildUploadFileData.call(this, inputDataFieldName, index),
-			},
+			bodyFactory: () => NodeUtils.buildUploadFormData.call(this, inputDataFieldName, index),
 		});
 	},
 };

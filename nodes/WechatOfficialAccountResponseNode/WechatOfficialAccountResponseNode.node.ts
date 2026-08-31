@@ -1,11 +1,11 @@
 import {
 	IExecuteFunctions,
+	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
 	NodeOperationError,
 	NodeTypeAndVersion,
 } from 'n8n-workflow';
-import { INodeExecutionData } from 'n8n-workflow/dist/Interfaces';
 import WechatMsgSignUtils from '../help/utils/WechatMsgSignUtils';
 import xmlConvert from 'xml-js';
 
@@ -21,7 +21,6 @@ export class WechatOfficialAccountResponseNode implements INodeType {
 		defaults: {
 			name: 'Wechat Official Account Response',
 		},
-		hint: '用于处理微信公众号的响应数据，请最后使用response节点进行响应',
 		// @ts-ignore
 		inputs: ['main'],
 		// @ts-ignore

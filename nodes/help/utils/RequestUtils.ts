@@ -1,54 +1,80 @@
-import { IExecuteFunctions, NodeOperationError } from 'n8n-workflow';
-import { IRequestOptions } from 'n8n-workflow/dist/Interfaces';
+import {
+	IDataObject,
+	IExecuteFunctions,
+	IHttpRequestOptions,
+	NodeOperationError,
+} from 'n8n-workflow';
 
+export const TOKEN_REFRESH_ERROR_CODES = new Set([40001, 40014, 42001]);
+
+type WechatResponse = IDataObject & {
+	errcode?: number;
+	errmsg?: string;
+};
+
+export type WechatRequestOptions = IHttpRequestOptions & {
+	bodyFactory?: () => Promise<IHttpRequestOptions['body']> | IHttpRequestOptions['body'];
+};
+
+export function parseWechatResponse(response: unknown): WechatResponse {
+	if (typeof response === 'string') return JSON.parse(response) as WechatResponse;
+	if (response && typeof response === 'object') return response as WechatResponse;
+	throw new Error('WeChat returned an invalid response');
+}
+
+export function shouldRefreshAccessToken(response: WechatResponse) {
+	return typeof response.errcode === 'number' && TOKEN_REFRESH_ERROR_CODES.has(response.errcode);
+}
+
+function buildWechatError(response: WechatResponse) {
+	return `Request Error: ${response.errcode ?? 'unknown'}, ${response.errmsg ?? 'unknown error'}`;
+}
 
 class RequestUtils {
 	static async originRequest(
 		this: IExecuteFunctions,
-		options: IRequestOptions,
-		clearAccessToken = false,
+		options: WechatRequestOptions,
+		forceRefresh = false,
 	) {
 		const credentials = await this.getCredentials('wechatOfficialAccountCredentialsApi');
+		const { bodyFactory, ...baseOptions } = options;
+		const requestOptions: IHttpRequestOptions = {
+			...baseOptions,
+			headers: baseOptions.headers ? { ...baseOptions.headers } : undefined,
+			qs: baseOptions.qs ? { ...baseOptions.qs } : undefined,
+		};
+		if (bodyFactory) requestOptions.body = await bodyFactory();
 
-		options.baseURL = `https://${credentials.baseUrl}`;
+		requestOptions.baseURL = `https://${credentials.baseUrl}`;
 
-		return this.helpers.requestWithAuthentication.call(this, 'wechatOfficialAccountCredentialsApi', options, {
-			// @ts-ignore
-			credentialsDecrypted: {
-				data: {
-					...credentials,
-					accessToken: clearAccessToken ? '' : credentials.accessToken,
+		return this.helpers.httpRequestWithAuthentication.call(
+			this,
+			'wechatOfficialAccountCredentialsApi',
+			requestOptions,
+			{
+				// @ts-ignore
+				credentialsDecrypted: {
+					data: {
+						...credentials,
+						accessToken: forceRefresh ? '' : credentials.accessToken,
+						forceRefresh,
+					},
 				},
 			},
-		});
+		);
 	}
 
-	static async request(this: IExecuteFunctions, options: IRequestOptions) {
-		return RequestUtils.originRequest.call(this, options).then((text) => {
-			const data: any = JSON.parse(text);
-			// 处理一次accesstoken过期的情况
-			if (data.errcode && data.errcode === 42001) {
-				return RequestUtils.originRequest.call(this, options, true)
-					.then((text) => {
-						const data: any = JSON.parse(text);
-						if (data.errcode && data.errcode !== 0) {
-							throw new NodeOperationError(
-								this.getNode(),
-								`Request Error: ${data.errcode}, ${data.errmsg}`,
-							);
-						}
-						return data;
-					});
-			}
+	static async request(this: IExecuteFunctions, options: WechatRequestOptions) {
+		let data = parseWechatResponse(await RequestUtils.originRequest.call(this, options));
 
-			if (data.errcode && data.errcode !== 0) {
-				throw new NodeOperationError(
-					this.getNode(),
-					`Request Error: ${data.errcode}, ${data.errmsg}`,
-				);
-			}
-			return data;
-		});
+		if (shouldRefreshAccessToken(data)) {
+			data = parseWechatResponse(await RequestUtils.originRequest.call(this, options, true));
+		}
+
+		if (data.errcode && data.errcode !== 0) {
+			throw new NodeOperationError(this.getNode(), buildWechatError(data));
+		}
+		return data;
 	}
 }
 
