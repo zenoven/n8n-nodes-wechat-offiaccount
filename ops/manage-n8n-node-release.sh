@@ -131,7 +131,9 @@ install_release() {
 			;;
 		/*)
 			[ -f "$source" ] || fail "artifact not found: $source"
-			cp "$source" "$artifact"
+			if [ "$source" != "$artifact" ]; then
+				cp "$source" "$artifact"
+			fi
 			;;
 		*) fail "artifact source must be an HTTPS URL or absolute path" ;;
 	esac

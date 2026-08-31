@@ -25,4 +25,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm lint
+      - run: sh -n ops/manage-n8n-node-release.sh
       - run: npm pack --dry-run
