@@ -23,6 +23,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm lint
+      - run: sh -n ops/manage-n8n-node-release.sh
       - name: Verify tag matches package version
         run: |
           package_version="$(node -p "require('./package.json').version")"

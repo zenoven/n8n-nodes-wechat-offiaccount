@@ -6,6 +6,7 @@ Token support, one bounded token-error retry, credential-log redaction, and n8n 
 compatibility fixes.
 
 - Release and rollback instructions: [PATCH-NOTES-ZENOVEN.md](PATCH-NOTES-ZENOVEN.md)
+- Upstream sync and release policy: [MAINTAINING-ZENOVEN.md](MAINTAINING-ZENOVEN.md)
 - Upstream project: <https://github.com/other-blowsnow/n8n-nodes-wechat-offiaccount>
 - Maintained releases: <https://github.com/zenoven/n8n-nodes-wechat-offiaccount/releases>
 
