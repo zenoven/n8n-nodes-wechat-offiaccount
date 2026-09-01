@@ -10,7 +10,7 @@ STATE_DIR="${STATE_DIR:-/opt/z8n/wechat-node-maintenance}"
 usage() {
 	printf '%s\n' \
 		"Usage:" \
-		"  $0 install <https-url-or-absolute-tgz> <sha256> <expected-version>" \
+		"  $0 install <https-url-or-absolute-tgz> <sha256> <expected-version> [extra-package@version ...]" \
 		"  $0 verify <expected-version>" \
 		"  $0 list-backups" \
 		"  $0 rollback <backup-id>"
@@ -58,9 +58,8 @@ verify_installation() {
 		-v "$VOLUME:/home/node/.n8n" \
 		--entrypoint node "$IMAGE" \
 		-e "const fs=require('fs'); const base='/home/node/.n8n/nodes/node_modules/$PACKAGE_NAME'; require(base+'/dist/credentials/WechatOfficialAccountCredentialsApi.credentials.js'); require(base+'/dist/nodes/WechatOfficialAccountNode/WechatOfficialAccountNode.node.js'); const s=fs.readFileSync(base+'/dist/credentials/WechatOfficialAccountCredentialsApi.credentials.js','utf8'); if(!s.includes('/cgi-bin/stable_token')) throw new Error('stable token endpoint missing'); if(s.includes('preAuthentication credentials')) throw new Error('credential logging still present');"
-
 	started_at="$(docker inspect "$CONTAINER" --format '{{.State.StartedAt}}')"
-	if docker logs --since "$started_at" "$CONTAINER" 2>&1 | grep -Eqi 'error loading package|cannot find module.*wechat-offiaccount'; then
+	if docker logs --since "$started_at" "$CONTAINER" 2>&1 | grep -Eqi 'failed to load package|error loading package|cannot find module'; then
 		fail "n8n logs contain a package load error"
 	fi
 	printf 'verified %s@%s in %s\n' "$PACKAGE_NAME" "$actual" "$CONTAINER"
@@ -109,6 +108,7 @@ install_release() {
 	source="$1"
 	expected_sha="$2"
 	expected_version="$3"
+	shift 3
 
 	case "$expected_sha" in
 		*[!0-9a-fA-F]*|'') fail "SHA-256 must contain only hexadecimal characters" ;;
@@ -117,6 +117,11 @@ install_release() {
 	case "$expected_version" in
 		*[!0-9A-Za-z.-]*|'') fail "invalid version" ;;
 	esac
+	for package_spec in "$@"; do
+		case "$package_spec" in
+			*[!0-9A-Za-z@/._-]*|'') fail "invalid extra package spec: $package_spec" ;;
+		esac
+	done
 
 	mkdir -p "$STATE_DIR/releases" "$STATE_DIR/backups"
 	artifact_name="$(basename "$source")"
@@ -141,7 +146,7 @@ install_release() {
 	actual_sha="$(sha256sum "$artifact" | awk '{print $1}')"
 	[ "$actual_sha" = "$expected_sha" ] || fail "artifact checksum mismatch"
 
-	package_version="$(docker run --rm --user node -v "$artifact:/release.tgz:ro" --entrypoint sh "$IMAGE" -c 'tar -xOzf /release.tgz package/package.json | node -e '\''let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => { const p=JSON.parse(s); process.stdout.write(p.name+" "+p.version); });'\''')"
+	package_version="$(docker run --rm --user 0 -v "$artifact:/release.tgz:ro" --entrypoint sh "$IMAGE" -c 'tar -xOzf /release.tgz package/package.json | node -e '\''let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => { const p=JSON.parse(s); process.stdout.write(p.name+" "+p.version); });'\''')"
 	[ "$package_version" = "$PACKAGE_NAME $expected_version" ] || fail "artifact identity mismatch: $package_version"
 
 	backup_id="$(create_backup)"
@@ -156,8 +161,9 @@ install_release() {
 	docker stop "$CONTAINER" >/dev/null
 	if ! docker run --rm --user node \
 		-v "$VOLUME:/home/node/.n8n" \
-		--entrypoint sh "$IMAGE" \
-		-c 'cd /home/node/.n8n/nodes && npm install --save-exact "/home/node/.n8n/node-releases/'"$artifact_name"'"'; then
+		--workdir /home/node/.n8n/nodes \
+		--entrypoint npm "$IMAGE" \
+		install --save-exact "/home/node/.n8n/node-releases/$artifact_name" "$@"; then
 		printf 'installation failed; restoring %s\n' "$backup_id" >&2
 		restore_backup_files "$backup_id"
 		docker start "$CONTAINER" >/dev/null
@@ -204,9 +210,10 @@ docker volume inspect "$VOLUME" >/dev/null 2>&1 || fail "Docker volume not found
 command="${1:-}"
 case "$command" in
 	install)
-		[ "$#" -eq 4 ] || { usage; exit 2; }
+		[ "$#" -ge 4 ] || { usage; exit 2; }
 		require_command curl
-		install_release "$2" "$3" "$4"
+		shift
+		install_release "$@"
 		;;
 	verify)
 		[ "$#" -eq 2 ] || { usage; exit 2; }

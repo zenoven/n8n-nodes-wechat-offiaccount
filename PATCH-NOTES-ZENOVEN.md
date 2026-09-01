@@ -35,8 +35,10 @@ the existing package and npm manifests before changing the installation. Do not 
 
 For the current Docker deployment, use [`ops/manage-n8n-node-release.sh`](ops/manage-n8n-node-release.sh).
 It backs up the complete community-node directory, verifies the release checksum and package
-identity, stops only the n8n container during the package change, checks startup, and retains the
-previous installation for an explicit rollback.
+identity, stops only the n8n container during the package change, checks startup logs for any
+community-package load failure, and retains the previous installation for an explicit rollback.
+Optional exact package specs may follow the maintained version argument when the shared community
+directory has known runtime supplements that npm must retain as declared root dependencies.
 
 ## Verification
 

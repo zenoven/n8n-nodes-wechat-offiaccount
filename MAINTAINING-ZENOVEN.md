@@ -78,6 +78,10 @@ The tag-to-package-version check in the Release workflow prevents an incorrectly
 
 Use a fixed GitHub Release artifact and checksum with `ops/manage-n8n-node-release.sh`. Do not install
 from a branch, a mutable URL, npm `latest`, or n8n's Community Nodes **Update** action.
+If the shared community-node directory relies on explicitly reviewed supplemental packages, pass
+their exact `package@version` specs after the maintained version so npm records rather than prunes
+them. The helper validates these specs and treats any community-package startup load error as an
+installation failure.
 
 Before promotion, confirm the AppSecret has not been exposed and rotate it if necessary. The helper
 must create a complete community-node backup before stopping only the n8n container. After startup,
